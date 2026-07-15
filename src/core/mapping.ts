@@ -72,9 +72,13 @@ function tokens(s: string): string[] {
   return normalize(s).split(' ').filter((t) => t && !STOP.has(t)).map(stem);
 }
 
-/** "90-95(A)(1)" -> "90-95A1": drop everything but letters, digits, and hyphens. */
+/**
+ * "90-95(A)(1)" -> "9095A1": drop ALL separators (dots, hyphens, spaces, §, parens) so
+ * every formatting style of the same code collapses to one key. Keeping hyphens (an earlier
+ * version) meant "302.113" and "302-113" produced different keys and failed to match.
+ */
 export function canonicalizeCode(code: string): string {
-  return String(code ?? '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  return String(code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 /** Best-effort code extraction from a compound free-text field. */
@@ -98,10 +102,16 @@ for (const e of knowledgeBase.entries) {
   if (nk && !tier2.has(nk)) tier2.set(nk, { category: e.category, subcategory: e.subcategory, severity: e.severity, matched: e.description });
 }
 
+// Inchoate subcategories are MODIFIERS ("conspiracy to distribute" is a drug crime; "harboring
+// aliens" is immigration). As bare keywords they signal almost nothing about the real category,
+// so they are EXCLUDED from Tier 3 entirely — such charges defer to the AI tier, which can place
+// them semantically. (A truly bare "Conspiracy" still resolves there via the embedder.)
+const INCHOATE_SUBS = new Set(['Conspiracy', 'Criminal Attempt', 'Accessory After the Fact', 'Accessory / Aiding & Abetting']);
+
 // Tier 3 anchors: precomputed tokens, longest phrase first (specific beats generic).
 const tier3 = anchorSet.anchors
   .map((a) => ({ toks: tokens(a.phrase), phrase: a.phrase, category: a.category, subcategory: a.subcategory }))
-  .filter((a) => a.toks.length > 0)
+  .filter((a) => a.toks.length > 0 && !INCHOATE_SUBS.has(a.subcategory))
   .sort((a, b) => b.toks.length - a.toks.length);
 
 function containsPhrase(hay: string[], needle: string[]): boolean {
@@ -153,7 +163,7 @@ export function mapCharge(input: MapInput): MapResult {
   }
   trace.push({ tier: 'Tier 2', label: 'Exact description', outcome: 'miss', detail: 'no verbatim KB match' });
 
-  // Tier 3 — keyword + stemming
+  // Tier 3 — keyword + stemming (inchoate anchors excluded; they defer to AI)
   const hay = tokens(desc);
   for (const a of tier3) {
     if (containsPhrase(hay, a.toks)) {

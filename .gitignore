@@ -19,3 +19,6 @@ pipeline/
 # logs / editor
 *.log
 .DS_Store
+
+# eval outputs (derived from prod/KB data — keep local)
+eval/

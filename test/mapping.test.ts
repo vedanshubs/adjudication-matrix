@@ -9,8 +9,14 @@ describe('Layer 0 normalization', () => {
   });
 
   it('canonicalizes statute codes', () => {
-    expect(canonicalizeCode('90-95(A)(1)')).toBe('90-95A1');
-    expect(canonicalizeCode('§ 5-10-101')).toBe('5-10-101');
+    expect(canonicalizeCode('90-95(A)(1)')).toBe('9095A1');
+    expect(canonicalizeCode('§ 5-10-101')).toBe('510101');
+  });
+
+  it('collapses dot / hyphen / space formatting variants to the same key', () => {
+    expect(canonicalizeCode('302.113')).toBe(canonicalizeCode('302-113'));
+    expect(canonicalizeCode('302.113')).toBe(canonicalizeCode('302 113'));
+    expect(canonicalizeCode('§ 302.113')).toBe('302113');
   });
 });
 

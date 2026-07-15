@@ -14,7 +14,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "build:embeddings": "tsx scripts/build-embeddings.ts"
+    "build:embeddings": "tsx scripts/build-embeddings.ts",
+    "eval:statute": "tsx scripts/eval-statute.ts",
+    "build:goldset": "tsx scripts/build-goldset.ts",
+    "eval:score": "tsx scripts/eval-score.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
