@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# generated data (compiled from Data/*.xlsx by scripts/build-data.ts)
+src/core/generated/
+
+# source data — contains real personal records (names, DOBs, addresses); keep local, never push
+Data/
+
+# throwaway prototypes (kept locally as reference, not versioned)
+poc/
+pipeline/
+
+# logs / editor
+*.log
+.DS_Store
