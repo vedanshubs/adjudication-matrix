@@ -22,3 +22,6 @@ pipeline/
 
 # eval outputs (derived from prod/KB data — keep local)
 eval/
+
+# secrets (Bedrock API key etc.) — never commit
+.env

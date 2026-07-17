@@ -17,10 +17,15 @@
     "build:embeddings": "tsx scripts/build-embeddings.ts",
     "eval:statute": "tsx scripts/eval-statute.ts",
     "build:goldset": "tsx scripts/build-goldset.ts",
-    "eval:score": "tsx scripts/eval-score.ts"
+    "eval:score": "tsx scripts/eval-score.ts",
+    "eval:llm": "tsx scripts/eval-llm.ts",
+    "make:deck": "tsx scripts/make-deck.ts",
+    "punchlist": "tsx scripts/taxonomy-punchlist.ts"
   },
   "devDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1087.0",
     "@types/node": "^22.10.0",
+    "pptxgenjs": "^4.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",

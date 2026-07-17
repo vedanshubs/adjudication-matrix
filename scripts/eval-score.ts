@@ -82,5 +82,14 @@ for (const t of [0.3, 0.5, 0.7, 0.85, 0.9, 0.95]) {
 console.log('\nWrong category (auto-decided):');
 m.ps.filter((x) => x.p.auto && x.p.predCat !== x.it.goldCat).slice(0, 15).forEach((x) => console.log(`  [${x.p.tier}] "${x.it.charge.slice(0, 40)}"  pred ${x.p.predCat} · gold ${x.it.goldCat}`));
 
+// per-charge results (needed to join against the LLM baseline for the taxonomy punch list)
+const perCharge = m.ps.map(({ it, p }) => ({
+  id: it.id, charge: it.charge, state: it.state, tier: p.tier, auto: p.auto,
+  gold_cat: it.goldCat, pred_cat: p.predCat, cat_ok: p.predCat === it.goldCat,
+  gold_sub: it.goldSub, pred_sub: p.predSub, sub_ok: p.predCat === it.goldCat && p.predSub === it.goldSub,
+}));
+const wb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(perCharge), 'Scores');
+XLSX.writeFile(wb, path.join(DIR, 'score_optionA.xlsx'));
 fs.writeFileSync(path.join(DIR, 'score_optionA.json'), JSON.stringify({ threshold: AI_THRESHOLD, coverage: m.coverage, catAccAuto: m.catAuto, subAccAuto: m.subAuto }, null, 1));
-console.log('\nWrote eval/score_optionA.json');
+console.log('\nWrote eval/score_optionA.{xlsx,json}');

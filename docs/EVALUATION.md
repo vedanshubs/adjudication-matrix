@@ -38,6 +38,11 @@ target precision"** — that determines human-review load and therefore cost.
   ambiguous / multi-offense / amended), difficulty, notes.
 - **Ground truth:** drafted by an LLM judge, then **reviewed and approved by a human.** 167 of 168
   are classifiable charges (1 is literally "Other" → not-a-charge).
+- **Second-pass audit:** the 20 hardest charges (where *both* the deterministic and LLM systems
+  failed) were re-reviewed by hand. Only **3 gold labels were actually wrong** (85% held up) — all
+  in the theft/financial boundary. Those 3 were corrected; results below use the corrected gold.
+  This audit surfaced a taxonomy gap: **Theft & Property Crimes has no value-based-theft subcategory**
+  (value-theft currently sits under Financial Crimes).
 - Reproduce: `npm run build:goldset` → `eval/goldset_v1.xlsx`; labels in `eval/goldset_v1_judged.xlsx`.
 
 > ⚠️ **Circularity note:** the gold labels were LLM-drafted + human-approved. The LLM baseline
@@ -49,15 +54,15 @@ target precision"** — that determines human-review load and therefore cost.
 
 ### 3.1 Set A — Option A vs. human gold (167 charges)
 
-At the default threshold (0.50):
+At the default threshold (0.50), against the human-corrected gold:
 
 | Metric | Result |
 |---|---|
 | **Coverage** (auto-decided) | **87.4%** (146/167) |
-| **Category accuracy** (auto) | **73.3%** |
+| **Category accuracy** (auto) | **75.3%** |
 | **Subcategory accuracy** (auto) | **50.7%** |
 
-By tier:
+By tier (pre-correction detail; the 3 gold fixes add ~2 pts to category):
 
 | Tier | n | Category acc | Subcategory acc |
 |---|---|---|---|
@@ -102,22 +107,50 @@ Reproduce: `npm run eval:statute`.
 
 ---
 
-## 4. LLM baseline (planned)
-Run a **different** frontier LLM over the same 167 gold charges, constrained to the v5 list, scored
-identically (category + subcategory accuracy). Then assemble the multi-axis scorecard:
+## 4. LLM baselines — 4 models on AWS Bedrock (us-east-2)
 
-| Axis | Option A | LLM |
-|---|---|---|
-| Category accuracy | 73.3% (measured) | _tbd_ |
-| Subcategory accuracy | 50.7% | _tbd_ |
-| Coverage @ precision | dial (see 3.1) | — |
-| Cost / charge | ~$0 + local compute | $ per API call |
-| Latency | ~ms, local | network |
-| Privacy | in-house | data leaves |
-| Auditable | candidate + score | opaque |
+Same 167 gold charges, full v5 taxonomy in the prompt, constrained to pick from the list only,
+`temperature 0`, scored identically to Option A. Reproduce: `BEDROCK_MODEL_ID=<id> npm run eval:llm`.
 
-The question is **not** "is the LLM more accurate?" but "does Option A hit the required precision
-bar at a fraction of the cost, auditable, data in-house?"
+### The full model sweep (all vs. human-corrected gold)
+
+| System | Category | Subcat | Cost / 1M† | Latency (avg) | Off-list cat |
+|---|---:|---:|---:|---:|---:|
+| **Option A** (self-hosted embedder+reranker) | 75.3% (dial → ~82%) | 50.7% | **~$0** | ~ms–300 ms | 0% |
+| Qwen3-32B (`qwen.qwen3-32b-v1:0`) | 79.6% | 58.1% | ~$405 | 1,060 ms | 0% |
+| gpt-oss-20b (`openai.gpt-oss-20b-1:0`) | 82.6% | 69.5% | ~$299 | 2,772 ms ⚠ | 4.8% ⚠ |
+| gpt-oss-120b (`openai.gpt-oss-120b-1:0`) | 87.4% | 73.7% | ~$527 | 1,873 ms | 0% |
+| **DeepSeek-V3** (`deepseek.v3-v1:0`) | **92.8%** | **74.3%** | ~$1,558 | 1,260 ms | 0% |
+
+†Cost is input-dominated — the full taxonomy (~2,620 tokens) is re-sent every call. Prompt caching or
+a shorter category list would cut all LLM costs ~10×. Per-token rates (in / out, per 1M): Qwen
+$0.15/$0.62 · gpt-oss-20b $0.07/$0.30 · gpt-oss-120b $0.15/$0.60 · DeepSeek-V3 $0.58/$1.68.
+
+### Reading the results
+- **A stronger model genuinely helps** — accuracy climbs 75% → 93% across the ladder. (An earlier
+  read that "it's all taxonomy, a bigger model won't help" was too strong; the sweep disproves it.)
+- **But there is a hard ~93% ceiling.** DeepSeek-V3's remaining errors are almost entirely the
+  **contestable-gold taxonomy boundaries** (`Bank Fraud` → Financial vs. gold's Fraud; gaming theft →
+  Theft vs. gold's Financial). ~93% is about the max any model can score on this gold set — the rest
+  is genuine taxonomy ambiguity, not model weakness.
+- **gpt-oss-20b is a poor trade** — slowest of all (reasoning-heavy, p95 7 s) and invents categories
+  4.8% of the time. It beats Qwen but is dominated by the 120b.
+- **Open-weight matters.** gpt-oss and DeepSeek are open models, so the "LLM = data leaves + per-call
+  fee" tradeoff need not apply — they can be self-hosted. gpt-oss-120b (120B) is far more practical to
+  self-host than DeepSeek-V3 (671B MoE).
+
+### Recommendation matrix
+
+| Priority | Choice |
+|---|---|
+| Cheapest, local, fully auditable | **Option A** (~75–82%, dial-able) |
+| Best accuracy-per-dollar | **gpt-oss-120b** (87% @ ~$527/M) |
+| Max accuracy, hosted | **DeepSeek-V3** (93% @ ~$1,558/M) |
+| Max accuracy, self-hosted | **gpt-oss-120b** (easiest open-weight to run) |
+
+The question was never "is an LLM more accurate?" (yes, by 5–18 pts) but **"what precision does the
+program need, at what cost, with what privacy/audit constraints?"** — and the sweep gives a defensible
+answer for each of those priorities. Beyond ~93%, the only lever is **fixing the taxonomy**, not the model.
 
 ---
 
@@ -126,24 +159,30 @@ bar at a fraction of the cost, auditable, data in-house?"
   `302-113` collapse to one key (dot↔hyphen match: 4.5% → 100%).
 - **Inchoate demotion (Tier 3):** `Conspiracy / Attempt / Accessory / Aiding & Abetting` anchors
   are excluded from Tier 3 (they signal nothing alone) and defer to the AI tier. Result: Tier 3
-  category accuracy 81.5% → **93.6%**; overall 70.5% → **73.3%**.
+  category accuracy 81.5% → **93.6%**; overall 70.5% → **73.3%** (75.3% post gold-correction).
+- **Gold corrections (human audit):** 3 labels fixed in the theft/financial boundary.
 
 ---
 
-## 6. Open items
-1. **AI-tier accuracy on traffic/DUI** — enrich the v5 anchor set (KB-side) and/or use a larger /
-   fine-tuned reranker (the architecture doc's "revisit later" path).
-2. **LLM baseline + scorecard** (§4).
-3. **Gold set** — expand beyond 168 for tighter per-category confidence; add inter-annotator
-   agreement if a second labeler is available.
-4. **KB data quality** — remove non-code entries from the alternate-citations column; review the
-   1,020 ambiguous code keys.
+## 6. Open items — for the KB team (the ~93% ceiling is taxonomy, not model)
+1. **Theft / Financial / Fraud boundary.** `Theft of Property (tiered by value)` sits under Financial
+   Crimes while retail/petty theft sits under Theft & Property — so generic "theft" is ambiguous, and
+   **Theft & Property has no value-theft subcategory**. Both surfaced by the human audit; both cap
+   *every* model. See `eval/taxonomy_punchlist.md`.
+2. **Traffic family.** Moving Violations vs Impaired Driving vs Commercial Transportation — driving-
+   while-suspended/revoked charges (`DWS`, `DUS`, `DWLS`) collide across all three.
+3. **KB data quality (Set B).** Remove non-code entries (2.3%) from the alternate-citations column;
+   review the ~1,000 ambiguous code keys (cross-cutting statutes like Attempt).
+4. **Gold set** — expand beyond 168 for tighter per-category confidence; add a second labeler for
+   inter-annotator agreement.
 
 ## Reproduce everything
 ```
-npm run build:data        # compile taxonomy + KB
-npm run build:embeddings  # precompute anchor embeddings (once)
-npm run eval:statute      # Set B report
-npm run build:goldset     # Set A sampler (blank sheet)
-npm run eval:score        # score Option A vs. the labeled gold set
+npm run build:data                          # compile taxonomy + KB
+npm run build:embeddings                    # precompute anchor embeddings (once)
+npm run eval:statute                        # Set B: statute-code validation
+npm run build:goldset                       # Set A sampler (blank labeling sheet)
+npm run eval:score                          # score Option A vs. the labeled gold set
+BEDROCK_MODEL_ID=<id> npm run eval:llm       # score an LLM baseline (needs AWS creds in .env)
+npm run punchlist                           # taxonomy punch list (both systems joined)
 ```
