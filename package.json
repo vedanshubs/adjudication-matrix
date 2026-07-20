@@ -5,9 +5,7 @@
   "type": "module",
   "description": "Criminal charge adjudication: offense mapping -> decision matrix (v5 taxonomy).",
   "scripts": {
-    "predev": "npm run build:data",
     "dev": "vite",
-    "prebuild": "npm run build:data",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "build:data": "tsx scripts/build-data.ts",

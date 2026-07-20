@@ -6,8 +6,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# generated data (compiled from Data/*.xlsx by scripts/build-data.ts)
-src/core/generated/
+# generated data (compiled from Data/*.xlsx by scripts/build-data.ts).
+# Committed on purpose: Data/ is gitignored for PII, so without these a fresh clone
+# cannot run. Derived from the law books + v5 taxonomy only — no candidate data.
+# Regenerate with `npm run build:data` when Data/ is present.
 
 # source data — contains real personal records (names, DOBs, addresses); keep local, never push
 Data/
