@@ -36,12 +36,18 @@ export interface KnowledgeBase {
   entries: KBEntry[];
 }
 
-/** A short v5-native keyword phrase used by Tier 3 (from Offense Examples / subcategory names). */
+/**
+ * A labeled anchor used by Tier 3 (keyword) and the AI tier (vector index).
+ * Sources: the v5 taxonomy (subcategory names / offense examples) AND the state law books'
+ * official offense descriptions — the latter is what the architecture calls the
+ * "vector index of the descriptions", and is far richer + state-specific.
+ */
 export interface Anchor {
   phrase: string;
   category: string;
   subcategory: string;
-  source: 'example' | 'subcategory';
+  source: 'example' | 'subcategory' | 'kb';
+  state?: string; // set for KB-sourced anchors; enables per-state filtering at scale
 }
 
 export interface AnchorSet {

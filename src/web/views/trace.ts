@@ -2,8 +2,19 @@
 // if the deterministic tiers can't place it, run the real AI tier (embedder + reranker).
 import { mapCharge, type MapResult, type TraceStep } from '../../core/mapping.ts';
 import { categoryByName } from '../../core/data.ts';
-import { classifyWithAI, type AIResult } from '../../core/ai.ts';
 import { esc, renderLadder } from '../ui.ts';
+
+/** Shape returned by POST /api/classify (the server-side RAG tier). */
+interface RagResponse {
+  category: string | null;
+  subcategory: string | null;
+  abstained: boolean;
+  choice: number;
+  options: { phrase: string; category: string; subcategory: string; cos: number }[];
+  model: string;
+  tokens: { input: number; output: number };
+  ms: number;
+}
 
 const EXAMPLES = [
   'Simple Assault',
@@ -34,56 +45,40 @@ function aiCard(): string {
       <div class="muted">No literal code, exact match, or keyword — so it goes to the AI layer. This build runs it for real, in your browser.</div></div>
     </div>
     <div class="aiflow">
-      <div class="aistep"><b>1 · Embedder</b><span>shortlist top-8 nearest anchors by meaning</span></div>
+      <div class="aistep"><b>1 · Retrieve</b><span>embedder pulls the top-10 nearest KB entries</span></div>
       <div class="aiarrow">→</div>
-      <div class="aistep"><b>2 · Reranker</b><span>cross-encoder scores the charge vs each</span></div>
+      <div class="aistep"><b>2 · LLM picks</b><span>chooses ONE candidate by number — cannot invent one</span></div>
       <div class="aiarrow">→</div>
-      <div class="aistep"><b>3 · Threshold</b><span>score ≥ dial → accept · else → human</span></div>
+      <div class="aistep"><b>3 · Or abstains</b><span>"none fit" → routed to a human</span></div>
     </div>
-    <div id="t-ai-run" style="margin-top:12px"><button class="chip" id="t-ai-btn" style="padding:8px 16px">Run AI classification</button>
-      <span class="muted" style="font-size:11.5px;margin-left:8px">first run downloads the small models (~60 MB, cached after)</span></div>
+    <div id="t-ai-run" style="margin-top:12px"><button class="chip" id="t-ai-btn" style="padding:8px 16px">Run RAG classification</button>
+      <span class="muted" style="font-size:11.5px;margin-left:8px">runs server-side (needs <code>npm run api</code>)</span></div>
     <div id="t-ai-out"></div>
   </div>`;
 }
 
-function aiResultHtml(ai: AIResult): string {
+function aiResultHtml(ai: RagResponse): string {
   const code = (name: string) => categoryByName.get(name)?.code ?? '—';
-  const pct = Math.round(ai.score * 100);
-  const thrPct = Math.round(ai.threshold * 100);
-  const weakEmbed = ai.maxCos < ai.cosFloor;
-  const verdict =
-    ai.outcome === 'accept'
-      ? `<span class="pill Clear">ACCEPT</span> <b>${code(ai.category!)} ${esc(ai.category)}</b> <span class="muted">/ ${esc(ai.subcategory)}</span>`
-      : ai.outcome === 'category-only'
-        ? `<span class="pill Review">CATEGORY ✓ · SUBCATEGORY → HUMAN</span> <b>${code(ai.category!)} ${esc(ai.category)}</b> <span class="muted">— agreed by ${ai.consensusVotes}/${ai.consensusOf} candidates; a person picks the subcategory</span>`
-        : weakEmbed
-          ? `<span class="pill Flagged">→ NOT A CHARGE?</span> ${esc(ai.reason)}`
-          : `<span class="pill Flagged">→ HUMAN</span> ${esc(ai.reason)}`;
-  // embedder-agreement bar (the guardrail signal)
-  const cosPct = Math.round(ai.maxCos * 100);
-  const floorPct = Math.round(ai.cosFloor * 100);
+  const verdict = ai.abstained
+    ? `<span class="pill Flagged">→ HUMAN</span> the model judged that none of the retrieved candidates fit`
+    : `<span class="pill Clear">PICKED #${ai.choice}</span> <b>${code(ai.category!)} ${esc(ai.category)}</b> <span class="muted">/ ${esc(ai.subcategory)}</span>`;
   return `
     <div style="margin-top:14px">
       <div style="margin-bottom:10px">${verdict}</div>
-      <div class="gate">
-        <div class="gate-row"><span class="gate-lbl">Embedder agreement</span>
-          <div class="dial"><div class="dial-fill ${weakEmbed ? 'bad' : 'ok'}" style="width:${cosPct}%"></div><div class="dial-thr" style="left:${floorPct}%" title="floor ${ai.cosFloor}"></div></div>
-          <span class="gate-val ${weakEmbed ? 'no' : 'yes'}">${ai.maxCos.toFixed(2)} ${weakEmbed ? '✗' : '✓'} <span class="muted">floor ${ai.cosFloor}</span></span></div>
-        <div class="gate-row"><span class="gate-lbl">Reranker confidence</span>
-          <div class="dial"><div class="dial-fill ${ai.score >= ai.threshold ? 'ok' : 'bad'}" style="width:${pct}%"></div><div class="dial-thr" style="left:${thrPct}%" title="threshold ${ai.threshold}"></div></div>
-          <span class="gate-val ${ai.score >= ai.threshold ? 'yes' : 'no'}">${ai.score.toFixed(2)} ${ai.score >= ai.threshold ? '✓' : '✗'} <span class="muted">dial ${ai.threshold}</span></span></div>
+      <div class="muted" style="font-size:11px;margin:6px 0 12px">
+        ${esc(ai.model)} · ${ai.tokens.input} in + ${ai.tokens.output} out tokens · ${ai.ms} ms ·
+        the model returns an <b>index</b> into this list, so it cannot invent a category
       </div>
-      <div class="muted" style="font-size:11px;margin:6px 0 12px">accept needs <b>both</b> gates · embed ${ai.timings.embedMs.toFixed(0)}ms + rerank ${ai.timings.rerankMs.toFixed(0)}ms</div>
       <table>
-        <thead><tr><th>Reranked candidate</th><th>Category</th><th>Subcategory</th><th>Embed cos</th><th>Rerank</th></tr></thead>
-        <tbody>${ai.shortlist
+        <thead><tr><th>#</th><th>Retrieved KB entry</th><th>Category</th><th>Subcategory</th><th>cos</th></tr></thead>
+        <tbody>${ai.options
           .map(
-            (c, i) => `<tr${i === 0 ? ' class="active"' : ''}>
-            <td>${esc(c.phrase)}</td>
+            (c, i) => `<tr${i + 1 === ai.choice ? ' class="breach"' : ''}>
+            <td><b>${i + 1}</b>${i + 1 === ai.choice ? ' ◄' : ''}</td>
+            <td>${esc(c.phrase.slice(0, 110))}${c.phrase.length > 110 ? '…' : ''}</td>
             <td><span class="code">${code(c.category)}</span> ${esc(c.category)}</td>
             <td class="muted">${esc(c.subcategory)}</td>
             <td class="muted">${c.cos.toFixed(2)}</td>
-            <td style="font-family:ui-monospace,Consolas,monospace">${c.rerank.toFixed(3)}</td>
           </tr>`,
           )
           .join('')}</tbody>
@@ -91,18 +86,16 @@ function aiResultHtml(ai: AIResult): string {
     </div>`;
 }
 
-/** Reflect the AI outcome back onto the cascade ladder so Tier 4–5 / 6 update. */
-function augmentTrace(trace: TraceStep[], ai: AIResult): TraceStep[] {
+/** Reflect the RAG outcome back onto the cascade ladder so Tier 4–5 / 6 update. */
+function augmentTrace(trace: TraceStep[], ai: RagResponse): TraceStep[] {
   return trace.map((s) => {
     if (s.tier === 'Tier 4–5') {
-      if (ai.outcome === 'accept') return { ...s, outcome: 'hit', detail: `reranker picked "${ai.shortlist[0].phrase}" → ${ai.category} / ${ai.subcategory} (${ai.score.toFixed(2)})` };
-      if (ai.outcome === 'category-only') return { ...s, outcome: 'hit', detail: `category ${ai.category} agreed ${ai.consensusVotes}/${ai.consensusOf} — subcategory to human` };
-      return { ...s, outcome: 'miss', detail: ai.reason };
+      return ai.abstained
+        ? { ...s, outcome: 'miss', detail: 'retrieved 10 candidates; the model judged none of them fit' }
+        : { ...s, outcome: 'hit', detail: `retrieved ${ai.options.length}, model picked #${ai.choice} → ${ai.category} / ${ai.subcategory}` };
     }
     if (s.tier === 'Tier 6') {
-      if (ai.outcome === 'accept') return s;
-      const what = ai.outcome === 'category-only' ? 'picks the subcategory' : 'decides the charge';
-      return { ...s, outcome: 'deferred', detail: `awaiting human — ${what}` };
+      return ai.abstained ? { ...s, outcome: 'deferred', detail: 'awaiting human — no candidate fit' } : s;
     }
     return s;
   });
@@ -150,20 +143,25 @@ export function renderTraceView(root: HTMLElement): void {
     const out = root.querySelector<HTMLDivElement>('#t-ai-out')!;
     btn.addEventListener('click', async () => {
       btn.disabled = true;
+      btn.textContent = 'Retrieving + asking the model…';
       const q = desc.value;
       try {
-        const ai = await classifyWithAI(q, {
-          onProgress: (stage, pct) => { btn.textContent = `Loading ${stage}… ${Math.round(pct)}%`; },
+        const resp = await fetch('/api/classify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: q, state: state.value || undefined }),
         });
-        if (desc.value !== q) return; // input changed while loading
-        btn.textContent = 'Re-run AI classification';
+        if (!resp.ok) throw new Error(`API ${resp.status}: ${(await resp.json().catch(() => ({}))).error ?? resp.statusText}`);
+        const ai = (await resp.json()) as RagResponse;
+        if (desc.value !== q) return; // input changed while in flight
+        btn.textContent = 'Re-run RAG classification';
         btn.disabled = false;
         out.innerHTML = aiResultHtml(ai);
         ladderEl.innerHTML = renderLadder(augmentTrace(current.trace, ai));
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = 'Run AI classification';
-        out.innerHTML = `<div class="muted" style="margin-top:10px;color:var(--low)">AI tier failed to load: ${esc((e as Error).message)}</div>`;
+        btn.textContent = 'Run RAG classification';
+        out.innerHTML = `<div class="muted" style="margin-top:10px;color:var(--low)">RAG tier unavailable: ${esc((e as Error).message)}<br/>Is the API running? <code>npm run api</code></div>`;
       }
     });
   };

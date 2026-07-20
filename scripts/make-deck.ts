@@ -80,7 +80,67 @@ s1.addNotes(
   'the final authority. Accuracy is never gambled.',
 );
 
-// ---------------- Slide 2 — the loop ----------------
+// ---------------- Slide 2 — the adjudication matrix (client-configurable) ----------------
+const sM = pptx.addSlide();
+sM.addText('The Adjudication Matrix — Rules You Configure', { x: 0.4, y: 0.28, w: 9.2, h: 0.4, fontSize: 22, bold: true, color: INK });
+sM.addText('Mapped charges feed a deterministic rule engine. The policy is tuned to each client’s risk appetite — same engine, your thresholds.', { x: 0.4, y: 0.68, w: 9.2, h: 0.28, fontSize: 12, color: MUT });
+
+// left: the matrix table, with the two tunable "knobs" per category highlighted
+sM.addText('For each category (and subcategory): a look-back window + an offense-count threshold', { x: 0.4, y: 1.06, w: 5.5, h: 0.24, fontSize: 10.5, bold: true, color: INK });
+sM.addText('CATEGORY', { x: 0.5, y: 1.36, w: 2.6, h: 0.22, fontSize: 8.5, bold: true, color: MUT });
+sM.addText('LOOK BACK', { x: 3.15, y: 1.36, w: 1.15, h: 0.22, fontSize: 8.5, bold: true, color: ACC, align: 'center' });
+sM.addText('FLAG AT', { x: 4.4, y: 1.36, w: 1.5, h: 0.22, fontSize: 8.5, bold: true, color: ACC, align: 'center' });
+const matrix: [string, string, string][] = [
+  ['Homicide', 'any', '1 conviction'],
+  ['Sexual Offenses', 'any', '1 conviction'],
+  ['Assault & Battery', 'any', '1 conviction'],
+  ['Drug Offenses', '7 yrs', '2 convictions'],
+  ['Impaired Driving', '5 yrs', '2 convictions'],
+  ['Theft & Property', '7 yrs', '2 convictions'],
+];
+let my = 1.62;
+for (const [cat, look, flag] of matrix) {
+  sM.addShape(pptx.ShapeType.roundRect, { x: 0.4, y: my, w: 5.5, h: 0.44, fill: { color: DET_BG }, line: { color: DET_LN, width: 0.75 }, rectRadius: 0.05 });
+  sM.addText(cat, { x: 0.55, y: my, w: 2.5, h: 0.44, fontSize: 10.5, color: INK, valign: 'middle' });
+  // tunable knobs
+  sM.addShape(pptx.ShapeType.roundRect, { x: 3.15, y: my + 0.07, w: 1.05, h: 0.3, fill: { color: 'FFFFFF' }, line: { color: ACC, width: 1 }, rectRadius: 0.04 });
+  sM.addText(look, { x: 3.15, y: my + 0.07, w: 1.05, h: 0.3, fontSize: 10, bold: true, color: ACC, align: 'center', valign: 'middle' });
+  sM.addShape(pptx.ShapeType.roundRect, { x: 4.4, y: my + 0.07, w: 1.4, h: 0.3, fill: { color: 'FFFFFF' }, line: { color: ACC, width: 1 }, rectRadius: 0.04 });
+  sM.addText(flag, { x: 4.4, y: my + 0.07, w: 1.4, h: 0.3, fontSize: 9.5, bold: true, color: ACC, align: 'center', valign: 'middle' });
+  my += 0.5;
+}
+sM.addText('▲  outlined values are set per client', { x: 3.15, y: my + 0.02, w: 2.75, h: 0.2, fontSize: 8, italic: true, color: ACC });
+
+// right: same record, three client policies -> three decisions
+sM.addText('Tuned to each client', { x: 6.15, y: 1.06, w: 3.45, h: 0.24, fontSize: 10.5, bold: true, color: INK });
+const clients: [string, string][] = [
+  ['Healthcare / Elder care', 'Any violence or abuse flags on the first offense; 10-yr drug look-back'],
+  ['Logistics / CDL', 'Impaired driving & moving violations weighted; DUI flags at one'],
+  ['Retail / Finance', 'Theft & fraud focus; tighter financial-crime windows'],
+];
+let cy2 = 1.4;
+for (const [name, desc] of clients) {
+  sM.addShape(pptx.ShapeType.roundRect, { x: 6.15, y: cy2, w: 3.45, h: 0.86, fill: { color: 'FFFFFF' }, line: { color: 'D8DEE9', width: 1 }, rectRadius: 0.06 });
+  sM.addText(name, { x: 6.28, y: cy2 + 0.06, w: 3.2, h: 0.24, fontSize: 11, bold: true, color: ACC });
+  sM.addText(desc, { x: 6.28, y: cy2 + 0.3, w: 3.2, h: 0.5, fontSize: 8.5, color: MUT });
+  cy2 += 0.98;
+}
+sM.addText('Same charges → different decisions, because the policy differs. The mapping is universal; the rules are the client’s.', { x: 6.15, y: cy2 + 0.02, w: 3.45, h: 0.5, fontSize: 8.5, italic: true, color: MUT });
+
+// bottom properties strip
+sM.addShape(pptx.ShapeType.roundRect, { x: 0.4, y: 4.82, w: 9.2, h: 0.42, fill: { color: OUT_BG }, line: { color: OUT_LN, width: 1 }, rectRadius: 0.06 });
+sM.addText('Deterministic  ·  explainable line-by-line  ·  per-state  ·  legally owned  ·  never a model', { x: 0.5, y: 4.82, w: 9.0, h: 0.42, fontSize: 10.5, bold: true, color: OUT_LN, align: 'center', valign: 'middle' });
+
+sM.addNotes(
+  '~18 sec\n\n' +
+  'Once each charge has a category, the adjudication matrix turns the whole record into a decision. ' +
+  'For every category you set two things — a look-back window and how many convictions trip the flag.\n\n' +
+  'And this is where each client tailors it: a healthcare provider flags any violence on the first offense; ' +
+  'a logistics firm weights impaired driving. Same engine, same mapping — your policy. ' +
+  'Every outcome is explainable, and it is rules, never a model.',
+);
+
+// ---------------- Slide 3 — the loop ----------------
 const s2 = pptx.addSlide();
 s2.addText('Feedback / Self-Learning Loop', { x: 0.4, y: 0.28, w: 9.2, h: 0.4, fontSize: 22, bold: true, color: INK });
 s2.addText('The system gets cheaper and more accurate the longer it runs — with no model retraining, and nothing going live unreviewed.', { x: 0.4, y: 0.68, w: 9.2, h: 0.28, fontSize: 12, color: MUT });

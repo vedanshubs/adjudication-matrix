@@ -16,20 +16,27 @@ import type { AnchorSet } from '../src/core/types.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GEN = path.join(ROOT, 'src', 'core', 'generated');
-const MODEL = 'Xenova/bge-small-en-v1.5';
+const MODEL = process.env.EMBED_MODEL ?? 'Xenova/bge-small-en-v1.5';
+const DTYPE = (process.env.EMBED_DTYPE ?? 'q8') as 'q8' | 'fp32' | 'fp16';
 
 env.allowLocalModels = false; // pull ONNX from the HF hub
 
 async function main() {
   const anchors = (JSON.parse(fs.readFileSync(path.join(GEN, 'anchors.json'), 'utf8')) as AnchorSet).anchors;
-  console.log(`embedding ${anchors.length} anchors with ${MODEL} (q8)...`);
+  console.log(`embedding ${anchors.length} anchors with ${MODEL} (${DTYPE})...`);
   const t0 = Date.now();
-  const embed = await pipeline('feature-extraction', MODEL, { dtype: 'q8' });
+  const embed = await pipeline('feature-extraction', MODEL, { dtype: DTYPE });
 
-  const dim = 384;
-  const out = new Float32Array(anchors.length * dim);
   const BATCH = 64;
-  for (let i = 0; i < anchors.length; i += BATCH) {
+  // detect the embedding dimension from the first batch (varies by model: 384 small, 1024 large)
+  const first = await embed(anchors.slice(0, Math.min(BATCH, anchors.length)).map((a) => a.phrase), { pooling: 'mean', normalize: true });
+  const firstCount = Math.min(BATCH, anchors.length);
+  const dim = (first.data as Float32Array).length / firstCount;
+  console.log(`  detected dim = ${dim}`);
+
+  const out = new Float32Array(anchors.length * dim);
+  out.set((first.data as Float32Array).subarray(0, firstCount * dim), 0);
+  for (let i = BATCH; i < anchors.length; i += BATCH) {
     const batch = anchors.slice(i, i + BATCH).map((a) => a.phrase);
     const res = await embed(batch, { pooling: 'mean', normalize: true });
     const data = res.data as Float32Array; // [batch * dim]

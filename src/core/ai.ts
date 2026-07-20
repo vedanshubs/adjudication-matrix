@@ -11,8 +11,15 @@
 import anchorsJson from './generated/anchors.json';
 import type { AnchorSet } from './types.ts';
 
-const EMBED_MODEL = 'Xenova/bge-small-en-v1.5';
-const RERANK_MODEL = 'Xenova/bge-reranker-base';
+// Node lets us A/B models via env; the browser falls back to the defaults.
+const ENV: Record<string, string | undefined> =
+  (typeof process !== 'undefined' && (process as { env?: Record<string, string | undefined> }).env) || {};
+// The embedder is taken from the anchor index itself (see loadAnchorEmbeddings) so the query
+// model can never mismatch the model the anchors were embedded with.
+let EMBED_MODEL = ENV.EMBED_MODEL ?? 'Xenova/bge-small-en-v1.5';
+const RERANK_MODEL = ENV.RERANK_MODEL ?? 'Xenova/bge-reranker-base';
+const EMBED_DTYPE = (ENV.EMBED_DTYPE ?? 'q8') as 'q8' | 'fp32' | 'fp16';
+const RERANK_DTYPE = (ENV.RERANK_DTYPE ?? 'q8') as 'q8' | 'fp32' | 'fp16';
 export const AI_THRESHOLD = 0.5; // reranker sigmoid score to auto-accept
 // Second gate: if the embedder's best match is this weak, the whole shortlist is
 // garbage and the reranker is only picking "least-bad" — so refuse regardless of its
@@ -34,8 +41,9 @@ let matrix: Float32Array | null = null;
 let DIM = 0;
 async function loadAnchorEmbeddings(): Promise<void> {
   if (matrix) return;
-  const emb = (await import('./generated/anchor-embeddings.json')).default as { dim: number; vectors: string };
+  const emb = (await import('./generated/anchor-embeddings.json')).default as { dim: number; vectors: string; model?: string };
   DIM = emb.dim;
+  if (emb.model) EMBED_MODEL = emb.model; // always query with the model the anchors were built with
   matrix = decodeVectors(emb.vectors);
 }
 
@@ -108,22 +116,50 @@ export function modelsReady(): boolean {
   return !!embedder && !!rerankModel;
 }
 
-export async function loadModels(onProgress?: ProgressFn): Promise<void> {
+async function loadEmbedder(onProgress?: ProgressFn): Promise<void> {
+  if (embedder) return;
   const tf = await import('@huggingface/transformers');
   tf.env.allowLocalModels = false;
-  if (!embedder) {
-    embedder = await tf.pipeline('feature-extraction', EMBED_MODEL, {
-      dtype: 'q8',
-      progress_callback: (p: any) => p?.progress != null && onProgress?.('embedder', p.progress),
-    });
-  }
-  if (!rerankModel) {
-    rerankTok = await tf.AutoTokenizer.from_pretrained(RERANK_MODEL);
-    rerankModel = await tf.AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL, {
-      dtype: 'q8',
-      progress_callback: (p: any) => p?.progress != null && onProgress?.('reranker', p.progress),
-    });
-  }
+  embedder = await tf.pipeline('feature-extraction', EMBED_MODEL, {
+    dtype: EMBED_DTYPE,
+    progress_callback: (p: any) => p?.progress != null && onProgress?.('embedder', p.progress),
+  });
+}
+
+async function loadReranker(onProgress?: ProgressFn): Promise<void> {
+  if (rerankModel) return;
+  const tf = await import('@huggingface/transformers');
+  tf.env.allowLocalModels = false;
+  rerankTok = await tf.AutoTokenizer.from_pretrained(RERANK_MODEL);
+  rerankModel = await tf.AutoModelForSequenceClassification.from_pretrained(RERANK_MODEL, {
+    dtype: RERANK_DTYPE,
+    progress_callback: (p: any) => p?.progress != null && onProgress?.('reranker', p.progress),
+  });
+}
+
+export async function loadModels(onProgress?: ProgressFn): Promise<void> {
+  await loadEmbedder(onProgress);
+  await loadReranker(onProgress);
+}
+
+/**
+ * Pure retrieval: embed the query and return the top-K nearest anchors by cosine.
+ * No reranker involved — this is the RAG "retrieve" step, and its recall is the hard
+ * ceiling for any retrieve-then-decide design.
+ */
+export async function retrieve(query: string, topK = 8, onProgress?: ProgressFn): Promise<Candidate[]> {
+  await loadAnchorEmbeddings();
+  await loadEmbedder(onProgress);
+  const mat = matrix!;
+  const q = (await embedder(query, { pooling: 'mean', normalize: true })).data as Float32Array;
+  const scored: Candidate[] = anchors.map((a, i) => {
+    let dot = 0;
+    const off = i * DIM;
+    for (let d = 0; d < DIM; d++) dot += q[d] * mat[off + d];
+    return { phrase: a.phrase, category: a.category, subcategory: a.subcategory, cos: dot, rerank: 0 };
+  });
+  scored.sort((x, y) => y.cos - x.cos);
+  return scored.slice(0, topK);
 }
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
@@ -135,26 +171,14 @@ export async function classifyWithAI(
 ): Promise<AIResult> {
   const topK = opts.topK ?? 8;
   const threshold = opts.threshold ?? AI_THRESHOLD;
-  await loadAnchorEmbeddings();
-  await loadModels(opts.onProgress);
-  const mat = matrix!;
 
-  // 1) embed query
+  // 1) + 2) retrieve: embed the query and take the top-K nearest anchors
   let t = performance.now();
-  const q = (await embedder(query, { pooling: 'mean', normalize: true })).data as Float32Array;
+  const shortlist = await retrieve(query, topK, opts.onProgress);
   const embedMs = performance.now() - t;
 
-  // 2) cosine shortlist (vectors are normalized, so cosine = dot product)
-  const scored: Candidate[] = anchors.map((a, i) => {
-    let dot = 0;
-    const off = i * DIM;
-    for (let d = 0; d < DIM; d++) dot += q[d] * mat[off + d];
-    return { phrase: a.phrase, category: a.category, subcategory: a.subcategory, cos: dot, rerank: 0 };
-  });
-  scored.sort((x, y) => y.cos - x.cos);
-  const shortlist = scored.slice(0, topK);
-
   // 3) rerank the shortlist (cross-encoder scores the charge against each candidate)
+  await loadReranker(opts.onProgress);
   t = performance.now();
   const inputs = rerankTok(Array(shortlist.length).fill(query), {
     text_pair: shortlist.map((c) => c.phrase),

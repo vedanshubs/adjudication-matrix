@@ -86,19 +86,21 @@ function buildTaxonomy(): Taxonomy {
   return { builtAt: new Date().toISOString(), source: path.basename(V5), categories };
 }
 
-// ---------- Tier 3 keyword anchors (v5-native) ----------
-function buildAnchors(): AnchorSet {
+// ---------- anchors: v5 taxonomy phrases + the law books' official descriptions ----------
+function buildAnchors(kbEntries: KBEntry[]): AnchorSet {
   const wb = XLSX.readFile(V5, { raw: false });
   const mapping = XLSX.utils.sheet_to_json<Row>(wb.Sheets['Category Mapping'], { defval: '' });
   const anchors: Anchor[] = [];
   const seen = new Set<string>();
-  const add = (phrase: string, category: string, subcategory: string, source: Anchor['source']) => {
+  const add = (phrase: string, category: string, subcategory: string, source: Anchor['source'], state?: string) => {
     const clean = phrase.replace(/^[A-Z]{2}:\s*/, '').trim(); // drop "CA:" state note prefixes
     const key = clean.toLowerCase();
     if (clean.length < 3 || seen.has(key)) return;
     seen.add(key);
-    anchors.push({ phrase: clean, category, subcategory, source });
+    anchors.push({ phrase: clean, category, subcategory, source, ...(state ? { state } : {}) });
   };
+
+  // 1) v5 taxonomy: subcategory names + curated offense examples
   for (const r of mapping) {
     const category = String(r['Category Name'] ?? '').trim();
     const subcategory = String(r['Subcategory'] ?? '').trim();
@@ -109,7 +111,12 @@ function buildAnchors(): AnchorSet {
       if (p) add(p, category, subcategory, 'example');
     }
   }
-  return { builtAt: new Date().toISOString(), source: path.basename(V5), anchors };
+
+  // 2) the state law books' official offense descriptions — rich, real, state-specific.
+  //    This is the "vector index of the descriptions" the architecture calls for.
+  for (const e of kbEntries) add(e.description, e.category, e.subcategory, 'kb', e.state);
+
+  return { builtAt: new Date().toISOString(), source: `${path.basename(V5)} + state KBs`, anchors };
 }
 
 // ---------- knowledge base ----------
@@ -148,7 +155,7 @@ function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const taxonomy = buildTaxonomy();
   const kb = buildKB();
-  const anchors = buildAnchors();
+  const anchors = buildAnchors(kb.entries); // KB descriptions become anchors too
   fs.writeFileSync(path.join(OUT, 'taxonomy.json'), JSON.stringify(taxonomy));
   fs.writeFileSync(path.join(OUT, 'kb.json'), JSON.stringify(kb));
   fs.writeFileSync(path.join(OUT, 'anchors.json'), JSON.stringify(anchors));

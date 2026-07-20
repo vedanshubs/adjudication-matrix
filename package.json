@@ -20,7 +20,11 @@
     "eval:score": "tsx scripts/eval-score.ts",
     "eval:llm": "tsx scripts/eval-llm.ts",
     "make:deck": "tsx scripts/make-deck.ts",
-    "punchlist": "tsx scripts/taxonomy-punchlist.ts"
+    "make:deck:rag": "tsx scripts/make-deck-rag.ts",
+    "punchlist": "tsx scripts/taxonomy-punchlist.ts",
+    "eval:recall": "tsx scripts/eval-recall.ts",
+    "eval:rag": "tsx scripts/eval-rag.ts",
+    "api": "tsx scripts/api-server.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1087.0",
