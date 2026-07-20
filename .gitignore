@@ -11,8 +11,20 @@ dist/
 # cannot run. Derived from the law books + v5 taxonomy only — no candidate data.
 # Regenerate with `npm run build:data` when Data/ is present.
 
-# source data — contains real personal records (names, DOBs, addresses); keep local, never push
-Data/
+# source data — contains real personal records (names, DOBs, addresses); keep local, never push.
+# Default-deny: everything under Data/ is excluded, then the law books are added back.
+# Anything new dropped into Data/ is ignored unless whitelisted below — deliberate, so a
+# stray export of candidate records can never be committed by accident.
+Data/*
+Data/Mappings/*
+
+# ...except the state law books and the v5 taxonomy. These are statute text and category
+# definitions — no candidate data — and build-data.ts needs them to rebuild the KB.
+!Data/Mappings/
+!Data/Mappings/files (1)/
+!Data/Mappings/Criminal_Category_Mapping_v5.xlsx
+!Data/Mappings/Criminal_Category_Mapping_v5.pdf
+!Data/Mappings/CA_Statutes_Complete.csv
 
 # throwaway prototypes (kept locally as reference, not versioned)
 poc/
